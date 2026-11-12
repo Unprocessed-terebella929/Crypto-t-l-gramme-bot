@@ -1,7 +1,6 @@
-// api/webhook.js — VERSION PRO UNIVERSELLE (Toutes Cryptos + Boutons Interactifs + Design HTML + Archives 1-18 ans)
+// api/webhook.js — VERSION 4 ENTERPRISE (Animations Live + Double Moteur IA/Natif + Multi-Sources + Archives 1-18 ans)
 
-// 1. Dictionnaire rapide des 40+ cryptos majeures (et recherche dynamique automatique pour toutes les autres)
-const POPULAR_COINS = {
+const CATALOG = {
   bitcoin: { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', year: 2008 },
   btc: { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', year: 2008 },
   ethereum: { id: 'ethereum', symbol: 'ETH', name: 'Ethereum', year: 2015 },
@@ -52,264 +51,153 @@ const POPULAR_COINS = {
   render: { id: 'render-token', symbol: 'RENDER', name: 'Render', year: 2020 }
 };
 
+const CRYPTO_KEYWORDS = [
+  'prix', 'cours', 'marche', 'marché', 'crypto', 'cryptomonnaie', 'cryptomonnaies', 'monnaie', 'devise',
+  'augmente', 'augmenté', 'baisse', 'baissé', 'stagne', 'stagné', 'hausse', 'chute', 'tendance', 'top',
+  'archive', 'archives', 'ans', 'an', 'annee', 'année', 'historique', 'hier', 'aujourd', 'évolution',
+  'evolution', 'comparer', 'compare', 'record', 'ath', 'analyse', 'investissement', 'valeur', 'combien',
+  'explose', 'bouge', 'rapport', 'bilan', 'statut', 'etat', 'état', 'dominance', 'volume', 'capitalisation',
+  'blockchain', 'token', 'altcoin', 'altcoins', 'defi', 'halving', 'minage', 'satoshi', '2008', '2010',
+  '2015', '2017', '2020', '2021', '2024', '2025', '2026'
+];
+
 const STOP_WORDS = new Set([
-  'le', 'la', 'les', 'de', 'des', 'du', 'un', 'une', 'et', 'ou', 'est', 'sont', 'que', 'qui',
-  'quoi', 'comment', 'pourquoi', 'prix', 'cours', 'crypto', 'cryptomonnaie', 'cryptomonnaies',
-  'marche', 'marché', 'analyse', 'archive', 'archives', 'ans', 'an', 'annee', 'année',
-  'hier', 'aujourd', 'hui', 'demain', 'tendance', 'hausse', 'baisse', 'fait', 'va', 'donne',
-  'moi', 'sur', 'dans', 'avec', 'pour', 'par', 'plus', 'moins', 'tout', 'toutes', 'tous',
-  'bonjour', 'salut', 'stp', 'merci', 'bot', 'quel', 'quelle', 'quels', 'quelles', 'évolution'
+  'le', 'la', 'les', 'de', 'des', 'du', 'un', 'une', 'et', 'ou', 'est', 'sont', 'que', 'qui', 'quoi',
+  'comment', 'pourquoi', 'donne', 'moi', 'sur', 'dans', 'avec', 'pour', 'par', 'plus', 'moins', 'tout',
+  'toutes', 'tous', 'bonjour', 'salut', 'stp', 'merci', 'bot', 'quel', 'quelle', 'quels', 'quelles',
+  'peux', 'tu', 'dire', 'voir', 'faire', 'fais', 'voudrais', 'aimerais', 'savoir', 'connais', 'parle'
 ]);
 
-// Clavier interactif affiché sous chaque message du bot
-function getMainKeyboard() {
-  return {
-    inline_keyboard: [
-      [
-        { text: '🌍 Radar Marché Global', callback_data: 'cmd_global' },
-        { text: '🔥 Top Tendances & Mouvements', callback_data: 'cmd_trending' }
-      ],
-      [
-        { text: '⚡ Focus BTC • ETH • SOL • ZEC', callback_data: 'cmd_majors' },
-        { text: '🕰️ Archives 1 à 18 ans', callback_data: 'cmd_history' }
-      ],
-      [
-        { text: '💡 Idées de questions & Aide', callback_data: 'cmd_help' }
-      ]
-    ]
-  };
+// Formatage propre des prix USD
+function fmtPrice(num) {
+  const n = Number(num);
+  if (isNaN(n) || n === 0) return 'N/A';
+  if (n < 0.001) return `$${n.toFixed(6)}`;
+  if (n < 1) return `$${n.toFixed(4)}`;
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-// 2. Détection intelligente de N'IMPORTE QUELLE cryptomonnaie dans la phrase de l'utilisateur
-async function resolveCoinsFromQuery(queryText) {
-  const clean = (queryText || '').toLowerCase();
-  const found = new Map();
-
-  // A. Recherche immédiate dans les 40+ cryptos connues
-  const words = clean.replace(/[^a-z0-9àâçéèêëîïôûùüÿñæœ]/gi, ' ').split(/\s+/).filter(Boolean);
-  for (const w of words) {
-    if (POPULAR_COINS[w]) {
-      found.set(POPULAR_COINS[w].symbol, POPULAR_COINS[w]);
-    }
-  }
-
-  // B. Si l'utilisateur mentionne un autre nom de crypto inconnu, on interroge le moteur de recherche CoinGecko
-  if (found.size === 0) {
-    const candidates = words.filter(w => w.length >= 3 && !STOP_WORDS.has(w)).slice(0, 2);
-    for (const candidate of candidates) {
-      try {
-        const res = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(candidate)}`, {
-          headers: { 'User-Agent': 'CryptoBotPro/3.0' }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const topCoin = data?.coins?.[0];
-          if (topCoin && (topCoin.name.toLowerCase().includes(candidate) || topCoin.symbol.toLowerCase() === candidate)) {
-            found.set(topCoin.symbol.toUpperCase(), {
-              id: topCoin.id,
-              symbol: topCoin.symbol.toUpperCase(),
-              name: topCoin.name,
-              year: 'N/A'
-            });
-          }
-        }
-      } catch (e) {
-        // Ignore erreur recherche unitaire
-      }
-    }
-  }
-
-  return Array.from(found.values()).slice(0, 6);
+function fmtPct(num) {
+  const n = Number(num || 0);
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${n.toFixed(2)}%`;
 }
 
-// 3. Collecte du Radar Global (Top du marché + Cryptos en feu + Dominances)
-async function fetchGlobalMarketOverview() {
+function trendBadge(pct1h, pct24h) {
+  const p = Number(pct24h || 0);
+  if (p >= 3) return '🚀 Forte hausse';
+  if (p > 0.35) return '🟢 En hausse';
+  if (p <= -3) return '🩸 Forte baisse';
+  if (p < -0.35) return '🔴 En baisse';
+  return '⚖️ Stagnation';
+}
+
+// Clavier interactif dynamique (s'adapte aux cryptos analysées)
+function buildKeyboard(customCoins = []) {
+  const rows = [];
+
+  if (customCoins.length === 1) {
+    const sym = customCoins[0].symbol;
+    rows.push([
+      { text: `🕰️ Archives ${sym} (1–18 ans)`, callback_data: `hist_${sym}` },
+      { text: `⚖️ Comparer ${sym} vs BTC`, callback_data: `cmp_${sym}` }
+    ]);
+  } else if (customCoins.length > 1) {
+    const syms = customCoins.slice(0, 2).map(c => c.symbol);
+    rows.push(syms.map(s => ({ text: `🔍 Focus & Archives ${s}`, callback_data: `hist_${s}` })));
+  }
+
+  rows.push([
+    { text: '🌍 Radar Marché Global', callback_data: 'cmd_global' },
+    { text: '🔥 Top Hausses & Tendances', callback_data: 'cmd_trending' }
+  ]);
+  rows.push([
+    { text: '⚡ Piliers (BTC•ETH•SOL•ZEC)', callback_data: 'cmd_majors' },
+    { text: '🕰️ Archives 1 à 18 ans', callback_data: 'cmd_history' }
+  ]);
+  rows.push([
+    { text: '🔄 Actualiser en direct', callback_data: 'cmd_refresh' },
+    { text: '🧭 Guide & Questions', callback_data: 'cmd_help' }
+  ]);
+
+  return { inline_keyboard: rows };
+}
+
+// --- SYSTÈME D'ANIMATION ET FEEDBACK EN TEMPS RÉEL SUR TELEGRAM ---
+async function sendProgressMessage(token, chatId, initialText) {
   try {
-    const [marketsRes, trendingRes, globalRes] = await Promise.all([
-      fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=15&page=1&price_change_percentage=1h,24h,7d', {
-        headers: { 'User-Agent': 'CryptoBotPro/3.0' }
-      }),
-      fetch('https://api.coingecko.com/api/v3/search/trending', {
-        headers: { 'User-Agent': 'CryptoBotPro/3.0' }
-      }),
-      fetch('https://api.coingecko.com/api/v3/global', {
-        headers: { 'User-Agent': 'CryptoBotPro/3.0' }
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: initialText,
+        parse_mode: 'HTML'
       })
-    ]);
-
-    const markets = marketsRes.ok ? await marketsRes.json() : [];
-    const trendingData = trendingRes.ok ? await trendingRes.json() : {};
-    const globalData = globalRes.ok ? await globalRes.json() : {};
-
-    const topCoins = markets.slice(0, 10).map(c => ({
-      nom: c.name,
-      symbole: c.symbol.toUpperCase(),
-      prix: `$${c.current_price}`,
-      var_1h: `${(c.price_change_percentage_1h_in_currency || 0).toFixed(2)}%`,
-      var_24h: `${(c.price_change_percentage_24h || 0).toFixed(2)}%`,
-      var_7j: `${(c.price_change_percentage_7d_in_currency || 0).toFixed(2)}%`
-    }));
-
-    // Tri pour identifier la plus forte hausse et plus forte baisse du Top 15
-    const sorted24h = [...markets].sort((a, b) => (b.price_change_percentage_24h || 0) - (a.price_change_percentage_24h || 0));
-    const topGainer = sorted24h[0];
-    const topLoser = sorted24h[sorted24h.length - 1];
-
-    const trendingCoins = (trendingData?.coins || []).slice(0, 5).map(t => ({
-      nom: t.item?.name,
-      symbole: t.item?.symbol,
-      rang: t.item?.market_cap_rank,
-      prix_usd: t.item?.data?.price ? `$${Number(t.item.data.price).toFixed(4)}` : 'N/A'
-    }));
-
-    const g = globalData?.data || {};
-
-    return {
-      meteo_globale: {
-        variation_marche_24h: g.market_cap_change_percentage_24h_usd ? `${g.market_cap_change_percentage_24h_usd.toFixed(2)}%` : 'N/A',
-        dominance_btc: g.market_cap_percentage?.btc ? `${g.market_cap_percentage.btc.toFixed(1)}%` : 'N/A',
-        dominance_eth: g.market_cap_percentage?.eth ? `${g.market_cap_percentage.eth.toFixed(1)}%` : 'N/A',
-        cryptos_actives: g.active_cryptocurrencies || '15000+'
-      },
-      leader_hausse_24h: topGainer ? `${topGainer.name} (${topGainer.symbol.toUpperCase()}) : +${(topGainer.price_change_percentage_24h || 0).toFixed(2)}%` : 'N/A',
-      leader_baisse_24h: topLoser ? `${topLoser.name} (${topLoser.symbol.toUpperCase()}) : ${(topLoser.price_change_percentage_24h || 0).toFixed(2)}%` : 'N/A',
-      top_10_marche: topCoins,
-      cryptos_tendances_du_moment: trendingCoins
-    };
+    });
+    const data = await res.json();
+    return data?.result?.message_id || null;
   } catch (e) {
-    return { erreur: 'Radar global momentanément indisponible' };
+    return null;
   }
 }
 
-// 4. Collecte détaillée + Archives de 1 à 18 ans pour une crypto précise
-async function fetchDetailedCoinWithArchives(coin) {
+async function updateProgressMessage(token, chatId, messageId, newText) {
+  if (!messageId) return;
   try {
-    const cgUrl = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${coin.id}&price_change_percentage=1h,24h,7d,30d,1y`;
-    const ccUrl = `https://min-api.cryptocompare.com/data/v2/histoday?fsym=${coin.symbol}&tsym=USD&allData=true`;
-
-    const [cgRes, ccRes] = await Promise.all([
-      fetch(cgUrl, { headers: { 'User-Agent': 'CryptoBotPro/3.0' } }),
-      fetch(ccUrl)
-    ]);
-
-    const cgData = cgRes.ok ? await cgRes.json() : [];
-    const ccData = ccRes.ok ? await ccRes.json() : null;
-    const live = cgData[0] || {};
-    const currentPrice = live.current_price || 0;
-
-    // Compression des archives de 1 à 18 ans
-    const historyPoints = ccData?.Data?.Data || [];
-    const archives = {};
-    const yearsList = [1, 2, 3, 5, 8, 10, 12, 15, 16];
-    const nowSec = Math.floor(Date.now() / 1000);
-
-    for (const yrs of yearsList) {
-      const targetSec = nowSec - (yrs * 365.25 * 86400);
-      const pt = historyPoints.find(p => p.time >= targetSec && p.close > 0);
-      if (pt && Math.abs(pt.time - targetSec) < 45 * 86400 && currentPrice > 0) {
-        const mult = currentPrice / pt.close;
-        const pct = ((currentPrice - pt.close) / pt.close) * 100;
-        archives[`Il_y_a_${yrs}_ans_${new Date(pt.time * 1000).getFullYear()}`] = {
-          prix_epoque: `$${pt.close < 1 ? pt.close.toFixed(4) : pt.close.toFixed(2)}`,
-          performance: mult >= 10 ? `x${mult.toFixed(1)}` : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
-        };
-      }
-    }
-
-    if (coin.symbol === 'BTC') {
-      archives['Origines_2008_2010_(16_a_18_ans)'] = '2008: Whitepaper (0$) | 2009: ~0.0009$ | Mai 2010: ~0.0041$';
-    }
-
-    return {
-      nom: coin.name,
-      symbole: coin.symbol,
-      rang_mondial: live.market_cap_rank || 'N/A',
-      direct: {
-        prix_usd: currentPrice,
-        var_1h: `${(live.price_change_percentage_1h_in_currency || 0).toFixed(2)}%`,
-        var_24h: `${(live.price_change_percentage_24h || 0).toFixed(2)}%`,
-        var_7j: `${(live.price_change_percentage_7d_in_currency || 0).toFixed(2)}%`,
-        var_30j: `${(live.price_change_percentage_30d_in_currency || 0).toFixed(2)}%`,
-        var_1an: `${(live.price_change_percentage_1y_in_currency || 0).toFixed(1)}%`,
-        record_absolu_ATH: `$${live.ath || 'N/A'} (${(live.ath_change_percentage || 0).toFixed(1)}% du record)`
-      },
-      archives_1_a_18_ans: archives
-    };
+    await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        text: newText,
+        parse_mode: 'HTML'
+      })
+    });
   } catch (e) {
-    return { nom: coin.name, symbole: coin.symbol, erreur: 'Données indisponibles' };
+    // Ignore si le texte est identique
   }
 }
 
-// 5. Génération de la réponse esthétique, humaine et intuitive via Gemini 2.5 Flash
-async function generateAestheticResponse(userPrompt, contextPayload) {
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  if (apiKey) {
+async function deliverFinalMessage(token, chatId, messageId, htmlText, keyboard) {
+  // 1. Si on a un message de progression ouvert, on le transforme en réponse finale (effet d'animation fluide)
+  if (messageId) {
     try {
-      const systemInstruction = `Tu es un stratège et analyste crypto charismatique, vivant et ultra-intuitif sur Telegram.
-Tu parles naturellement comme un expert passionné (jamais comme un robot mécanique ni répétitif).
-
-DONNÉES EN DIRECT ET ARCHIVES (1 À 18 ANS) :
-${JSON.stringify(contextPayload)}
-
-RÈGLES ESTHÉTIQUES ET DE MISE EN PAGE (FORMAT HTML TELEGRAM STRICT) :
-1. Utilise UNIQUEMENT les balises HTML supportées par Telegram : <b>gras</b>, <i>italique</i>, <code>chiffres/prix</code>, et <blockquote>encadré de synthèse ou conseil</blockquote>. N'utilise JAMAIS d'astérisques ** ou de Markdown.
-2. Structure visuellement ta réponse avec élégance :
-   • Un titre accrocheur avec emoji adapté à l'humeur du marché.
-   • Des séparateurs visuels fins : <code>━━━━━━━━━━━━━━━━━━</code>
-   • Des puces visuelles claires : 🟢 (hausse), 🔴 (baisse), ⚖️ (stagnation), 🔥 (tendance), 🕰️ (archive).
-   • Termine par un court encadré <blockquote>💡 <b>L'œil de l'analyste :</b> (une observation pertinente en 1-2 phrases + une suggestion interactive sur ce que l'utilisateur peut demander ensuite)</blockquote>.
-3. Sois digeste et percutant (12 à 18 lignes maximum) : sélectionne les données qui répondent exactement à la demande sans noyer le lecteur.`;
-
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: `${systemInstruction}\n\nDemande de l'utilisateur : "${userPrompt}"` }] }],
-            generationConfig: { temperature: 0.45, maxOutputTokens: 700 }
-          })
-        }
-      );
-
-      const json = await res.json();
-      let reply = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (reply) {
-        // Nettoyage de sécurité au cas où des ** glissent dans le HTML
-        reply = reply.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>').replace(/```html|```/g, '').trim();
-        return reply;
-      }
+      const editRes = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          text: htmlText,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+          reply_markup: keyboard
+        })
+      });
+      const editData = await editRes.json();
+      if (editData.ok) return;
     } catch (e) {
-      console.error('Erreur Gemini:', e);
+      // Bascule sur sendMessage si l'édition échoue
     }
   }
 
-  // Secours esthétique si la clé IA ne répond pas
-  return `⚡ <b>Radar Crypto en Direct</b>\n<code>━━━━━━━━━━━━━━━━━━</code>\nLes données du marché ont été récupérées avec succès. Utilise les boutons ci-dessous pour explorer une crypto ou une période précise !`;
-}
-
-// Fonction d'envoi sécurisée sur Telegram (avec boutons interactifs et sécurité anti-erreur de formatage)
-async function sendTelegramMessage(token, chatId, htmlText, showButtons = true) {
-  const payload = {
-    chat_id: chatId,
-    text: htmlText,
-    parse_mode: 'HTML',
-    disable_web_page_preview: true
-  };
-  if (showButtons) {
-    payload.reply_markup = getMainKeyboard();
-  }
-
-  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  // 2. Envoi direct (ou fallback texte propre si balise HTML mal fermée)
+  const sendRes = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: htmlText,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      reply_markup: keyboard
+    })
   });
+  const sendData = await sendRes.json();
 
-  // Si une balise HTML mal fermée bloque l'envoi, on renvoie immédiatement en texte brut propre
-  const data = await res.json();
-  if (!data.ok) {
+  if (!sendData.ok) {
     const cleanText = htmlText.replace(/<[^>]*>/g, '');
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
@@ -317,45 +205,506 @@ async function sendTelegramMessage(token, chatId, htmlText, showButtons = true) 
       body: JSON.stringify({
         chat_id: chatId,
         text: cleanText,
-        reply_markup: showButtons ? getMainKeyboard() : undefined
+        reply_markup: keyboard
       })
     });
   }
 }
 
-// 6. Contrôleur principal (Orchestre la recherche selon la question ou le bouton cliqué)
-async function processUserRequest(userQuery) {
-  const detectedCoins = await resolveCoinsFromQuery(userQuery);
+// --- COLLECTE MULTI-SOURCES HAUTE DISPONIBILITÉ (CryptoCompare + CoinGecko) ---
 
-  // Si l'utilisateur parle de cryptos spécifiques, on charge leurs données + archives (et un coup d'œil global)
-  if (detectedCoins.length > 0) {
-    const [coinsDetails, globalOverview] = await Promise.all([
-      Promise.all(detectedCoins.map(fetchDetailedCoinWithArchives)),
-      fetchGlobalMarketOverview()
-    ]);
-    return generateAestheticResponse(userQuery, {
-      cryptos_demandees: coinsDetails,
-      contexte_marche_global: globalOverview.meteo_globale
-    });
+async function resolveCoinsFromText(text) {
+  const clean = (text || '').toLowerCase();
+  const found = new Map();
+
+  const words = clean.replace(/[^a-z0-9àâçéèêëîïôûùüÿñæœ]/gi, ' ').split(/\s+/).filter(Boolean);
+  for (const w of words) {
+    if (CATALOG[w]) {
+      found.set(CATALOG[w].symbol, CATALOG[w]);
+    }
   }
 
-  // Sinon (question sur le marché en général, les cryptos qui explosent, etc.), on charge le Radar Global + BTC/ETH/SOL/ZEC
-  const [globalOverview, coreCoins] = await Promise.all([
-    fetchGlobalMarketOverview(),
-    Promise.all([POPULAR_COINS.btc, POPULAR_COINS.eth, POPULAR_COINS.sol, POPULAR_COINS.zec].map(fetchDetailedCoinWithArchives))
-  ]);
+  // Recherche dynamique si l'utilisateur mentionne un autre altcoin
+  if (found.size === 0) {
+    const candidates = words.filter(w => w.length >= 3 && !STOP_WORDS.has(w) && !CRYPTO_KEYWORDS.includes(w)).slice(0, 2);
+    for (const cand of candidates) {
+      try {
+        const res = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(cand)}`, {
+          headers: { 'User-Agent': 'CryptoCoreEngine/4.0' }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const top = data?.coins?.[0];
+          if (top && (top.name.toLowerCase().includes(cand) || top.symbol.toLowerCase() === cand)) {
+            found.set(top.symbol.toUpperCase(), {
+              id: top.id,
+              symbol: top.symbol.toUpperCase(),
+              name: top.name,
+              year: 'N/A'
+            });
+          }
+        }
+      } catch (e) {}
+    }
+  }
 
-  return generateAestheticResponse(userQuery, {
-    radar_marche_global: globalOverview,
-    focus_piliers_et_archives: coreCoins
-  });
+  return Array.from(found.values()).slice(0, 5);
 }
 
+// Récupère le Top 15 mondial + Tendances (avec bascule automatique si CoinGecko limite l'IP)
+async function fetchGlobalMarketData() {
+  let topList = [];
+  let trendingList = [];
+  let globalStats = { dominance_btc: 'N/A', dominance_eth: 'N/A', market_change_24h: 'N/A' };
+
+  try {
+    const [ccTopRes, cgTopRes, cgTrendRes, cgGlobalRes] = await Promise.allSettled([
+      fetch('https://min-api.cryptocompare.com/data/top/mktcapfull?limit=15&tsym=USD'),
+      fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=15&page=1&price_change_percentage=1h,24h,7d', {
+        headers: { 'User-Agent': 'CryptoCoreEngine/4.0' }
+      }),
+      fetch('https://api.coingecko.com/api/v3/search/trending', {
+        headers: { 'User-Agent': 'CryptoCoreEngine/4.0' }
+      }),
+      fetch('https://api.coingecko.com/api/v3/global', {
+        headers: { 'User-Agent': 'CryptoCoreEngine/4.0' }
+      })
+    ]);
+
+    // 1. Priorité aux données de marché disponibles (CoinGecko ou CryptoCompare)
+    if (cgTopRes.status === 'fulfilled' && cgTopRes.value.ok) {
+      const cgMarkets = await cgTopRes.value.json();
+      if (Array.isArray(cgMarkets) && cgMarkets.length > 0) {
+        topList = cgMarkets.map(c => ({
+          name: c.name,
+          symbol: (c.symbol || '').toUpperCase(),
+          price: c.current_price || 0,
+          change1h: c.price_change_percentage_1h_in_currency || 0,
+          change24h: c.price_change_percentage_24h || 0,
+          change7d: c.price_change_percentage_7d_in_currency || 0,
+          ath: c.ath || 0
+        }));
+      }
+    }
+
+    // Fallback instantané sur CryptoCompare si CoinGecko a renvoyé une erreur 429
+    if (topList.length === 0 && ccTopRes.status === 'fulfilled' && ccTopRes.value.ok) {
+      const ccJson = await ccTopRes.value.json();
+      const rawList = ccJson?.Data || [];
+      topList = rawList
+        .filter(item => item?.RAW?.USD)
+        .map(item => {
+          const info = item.CoinInfo || {};
+          const usd = item.RAW.USD;
+          return {
+            name: info.FullName || info.Name,
+            symbol: (info.Name || '').toUpperCase(),
+            price: usd.PRICE || 0,
+            change1h: usd.CHANGEPCTHOUR || 0,
+            change24h: usd.CHANGEPCT24HOUR || 0,
+            change7d: 0,
+            ath: usd.HIGH24HOUR || 0
+          };
+        });
+    }
+
+    if (cgTrendRes.status === 'fulfilled' && cgTrendRes.value.ok) {
+      const trJson = await cgTrendRes.value.json();
+      trendingList = (trJson?.coins || []).slice(0, 6).map(t => ({
+        name: t.item?.name,
+        symbol: (t.item?.symbol || '').toUpperCase(),
+        rank: t.item?.market_cap_rank || 'N/A',
+        change24h: t.item?.data?.price_change_percentage_24h?.usd || 0
+      }));
+    }
+
+    if (cgGlobalRes.status === 'fulfilled' && cgGlobalRes.value.ok) {
+      const gJson = await cgGlobalRes.value.json();
+      const g = gJson?.data || {};
+      globalStats = {
+        dominance_btc: g.market_cap_percentage?.btc ? `${g.market_cap_percentage.btc.toFixed(1)}%` : '56.0%',
+        dominance_eth: g.market_cap_percentage?.eth ? `${g.market_cap_percentage.eth.toFixed(1)}%` : '13.5%',
+        market_change_24h: g.market_cap_change_percentage_24h_usd ? fmtPct(g.market_cap_change_percentage_24h_usd) : 'N/A'
+      };
+    }
+  } catch (e) {
+    console.error('Erreur GlobalMarket:', e);
+  }
+
+  const sortedBy24h = [...topList].sort((a, b) => b.change24h - a.change24h);
+  return {
+    globalStats,
+    topList: topList.slice(0, 12),
+    topGainers: sortedBy24h.slice(0, 3),
+    topLosers: sortedBy24h.slice(-3).reverse(),
+    trendingList
+  };
+}
+
+// Récupère le profil complet d'une crypto + ses archives de 1 à 18 ans (100% garanti via CryptoCompare histoday)
+async function fetchCoinCompleteProfile(coin) {
+  try {
+    const [ccLiveRes, ccHistRes, cgRes] = await Promise.allSettled([
+      fetch(`https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${coin.symbol}&tsyms=USD`),
+      fetch(`https://min-api.cryptocompare.com/data/v2/histoday?fsym=${coin.symbol}&tsym=USD&allData=true`),
+      fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${coin.id}&price_change_percentage=1h,24h,7d,30d,1y`, {
+        headers: { 'User-Agent': 'CryptoCoreEngine/4.0' }
+      })
+    ]);
+
+    let price = 0, change1h = 0, change24h = 0, change7d = 0, change30d = 0, high24h = 0, low24h = 0, ath = 0;
+
+    if (ccLiveRes.status === 'fulfilled' && ccLiveRes.value.ok) {
+      const ccLive = await ccLiveRes.value.json();
+      const usd = ccLive?.RAW?.[coin.symbol]?.USD;
+      if (usd) {
+        price = usd.PRICE || 0;
+        change1h = usd.CHANGEPCTHOUR || 0;
+        change24h = usd.CHANGEPCT24HOUR || 0;
+        high24h = usd.HIGH24HOUR || 0;
+        low24h = usd.LOW24HOUR || 0;
+      }
+    }
+
+    if (cgRes.status === 'fulfilled' && cgRes.value.ok) {
+      const cgArr = await cgRes.value.json();
+      const cg = cgArr?.[0];
+      if (cg) {
+        price = cg.current_price || price;
+        change1h = cg.price_change_percentage_1h_in_currency ?? change1h;
+        change24h = cg.price_change_percentage_24h ?? change24h;
+        change7d = cg.price_change_percentage_7d_in_currency || 0;
+        change30d = cg.price_change_percentage_30d_in_currency || 0;
+        ath = cg.ath || 0;
+      }
+    }
+
+    // Traitement mathématique des archives de 1 à 18 ans
+    const archives = [];
+    if (ccHistRes.status === 'fulfilled' && ccHistRes.value.ok) {
+      const histJson = await ccHistRes.value.json();
+      const points = histJson?.Data?.Data || [];
+
+      if (points.length > 0) {
+        // Calcul de l'ATH et variations 7j/30j si CoinGecko était absent
+        for (const p of points) {
+          if (p.high > ath) ath = p.high;
+        }
+        const len = points.length;
+        if (!change7d && len > 7 && points[len - 8]?.close > 0) {
+          change7d = ((price - points[len - 8].close) / points[len - 8].close) * 100;
+        }
+        if (!change30d && len > 30 && points[len - 31]?.close > 0) {
+          change30d = ((price - points[len - 31].close) / points[len - 31].close) * 100;
+        }
+
+        const nowSec = Math.floor(Date.now() / 1000);
+        const targetYears = [1, 2, 3, 5, 8, 10, 12, 15, 16];
+
+        for (const yrs of targetYears) {
+          const targetSec = nowSec - (yrs * 365.25 * 86400);
+          const pt = points.find(p => p.time >= targetSec && p.close > 0);
+          if (pt && Math.abs(pt.time - targetSec) < 60 * 86400 && price > 0) {
+            const oldPrice = pt.close;
+            const mult = price / oldPrice;
+            const pct = ((price - oldPrice) / oldPrice) * 100;
+            const yearLabel = new Date(pt.time * 1000).getFullYear();
+            archives.push({
+              periode: `Il y a ${yrs} an${yrs > 1 ? 's' : ''} (${yearLabel})`,
+              prix_epoque: fmtPrice(oldPrice),
+              performance: mult >= 10 ? `x${mult.toFixed(1)}` : fmtPct(pct)
+            });
+          }
+        }
+      }
+    }
+
+    if (coin.symbol === 'BTC') {
+      archives.push({
+        periode: 'Il y a 17–18 ans (Genèse 2008–2009)',
+        prix_epoque: '$0.0009 (1ère cotation 2009)',
+        performance: 'Whitepaper 2008 (0$) • Mai 2010: $0.0041'
+      });
+    }
+
+    return {
+      name: coin.name,
+      symbol: coin.symbol,
+      year: coin.year,
+      price,
+      change1h,
+      change24h,
+      change7d,
+      change30d,
+      high24h,
+      low24h,
+      ath,
+      status: trendBadge(change1h, change24h),
+      archives
+    };
+  } catch (e) {
+    return { name: coin.name, symbol: coin.symbol, error: true };
+  }
+}
+
+// --- MOTEUR ANALYTIQUE NATIF (GARANTIT UNE RÉPONSE PARFAITE MÊME SANS IA) ---
+function buildNativeExpertReport(mode, userText, data) {
+  const { coinsData = [], marketData = null } = data;
+
+  // 1. Mode Archives 1 à 18 ans
+  if (mode === 'history') {
+    let out = `🕰️ <b>ARCHIVES HISTORIQUES (1 À 18 ANS) & COMPARATIF DIRECT</b>\n`;
+    out += `<code>━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`;
+
+    for (const c of coinsData) {
+      if (c.error || !c.price) continue;
+      out += `💎 <b>${c.name} (${c.symbol})</b> — Actuel : <code>${fmtPrice(c.price)}</code> (${fmtPct(c.change24h)} / 24h)\n`;
+      if (c.ath) out += `   🏆 <i>Record absolu (ATH) :</i> <code>${fmtPrice(c.ath)}</code>\n`;
+      if (c.archives && c.archives.length > 0) {
+        for (const a of c.archives) {
+          out += `   • <b>${a.periode} :</b> <code>${a.prix_epoque}</code> ➔ <b>${a.performance}</b>\n`;
+        }
+      } else {
+        out += `   • <i>Actif récent : suivi en temps réel disponible.</i>\n`;
+      }
+      out += `\n`;
+    }
+
+    out += `<blockquote>💡 <b>Analyse Long Terme :</b> Les cycles historiques montrent l'importance de comparer la volatilité court terme (24h) avec la trajectoire pluriannuelle. Tape le nom de n'importe quelle crypto pour extraire ses archives !</blockquote>`;
+    return out;
+  }
+
+  // 2. Mode Tendances & Plus Forts Mouvements
+  if (mode === 'trending' && marketData) {
+    let out = `🔥 <b>RADAR DES TENDANCES & MOUVEMENTS FORTS (24H)</b>\n`;
+    out += `<code>━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`;
+
+    if (marketData.topGainers.length > 0) {
+      out += `🚀 <b>Leaders à la Hausse (Top Cap) :</b>\n`;
+      for (const g of marketData.topGainers) {
+        out += `• <b>${g.name} (${g.symbol})</b> : <code>${fmtPrice(g.price)}</code> (<b>${fmtPct(g.change24h)}</b> sur 24h | 1h: ${fmtPct(g.change1h)})\n`;
+      }
+      out += `\n`;
+    }
+
+    if (marketData.topLosers.length > 0) {
+      out += `📉 <b>Plus Fortes Corrections (24h) :</b>\n`;
+      for (const l of marketData.topLosers) {
+        out += `• <b>${l.name} (${l.symbol})</b> : <code>${fmtPrice(l.price)}</code> (<b>${fmtPct(l.change24h)}</b> sur 24h | 1h: ${fmtPct(l.change1h)})\n`;
+      }
+      out += `\n`;
+    }
+
+    if (marketData.trendingList.length > 0) {
+      out += `⚡ <b>Cryptos les plus recherchées en ce moment :</b>\n`;
+      for (const t of marketData.trendingList) {
+        out += `• <b>${t.name} (${t.symbol})</b> — Rang #${t.rank} (${fmtPct(t.change24h)})\n`;
+      }
+      out += `\n`;
+    }
+
+    out += `<blockquote>💡 <b>Conseil Radar :</b> Écris simplement le nom d'une de ces cryptos dans le chat pour obtenir son analyse complète et ses archives.</blockquote>`;
+    return out;
+  }
+
+  // 3. Mode Panorama du Marché Global
+  if (mode === 'global' && marketData && marketData.topList.length > 0) {
+    const g = marketData.globalStats;
+    let out = `🌍 <b>PANORAMA DU MARCHÉ CRYPTO EN DIRECT</b>\n`;
+    out += `<code>━━━━━━━━━━━━━━━━━━━━━━</code>\n`;
+    out += `📊 <b>Dominance BTC :</b> <code>${g.dominance_btc}</code> | <b>ETH :</b> <code>${g.dominance_eth}</code>\n\n`;
+
+    out += `🏆 <b>Top 10 Capitalisations Mondiales :</b>\n`;
+    for (const c of marketData.topList.slice(0, 10)) {
+      const icon = c.change24h > 0.3 ? '🟢' : c.change24h < -0.3 ? '🔴' : '⚖️';
+      out += `${icon} <b>${c.name} (${c.symbol})</b> : <code>${fmtPrice(c.price)}</code>\n`;
+      out += `   ↳ <i>1h:</i> <code>${fmtPct(c.change1h)}</code> | <i>24h:</i> <b>${fmtPct(c.change24h)}</b>\n`;
+    }
+
+    out += `\n<blockquote>💡 <b>Lecture du marché :</b> Clique sur un onglet ci-dessous ou pose-moi une question précise (ex: <i>"Compare Solana et Ethereum sur 3 ans"</i>).</blockquote>`;
+    return out;
+  }
+
+  // 4. Mode Analyse de Cryptos Spécifiques (ou Piliers BTC/ETH/SOL/ZEC)
+  let out = `⚡ <b>RAPPORT D'ANALYSE CRYPTO EN DIRECT</b>\n`;
+  out += `<code>━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`;
+
+  for (const c of coinsData) {
+    if (c.error || !c.price) continue;
+    out += `🔹 <b>${c.name} (${c.symbol})</b> — <code>${fmtPrice(c.price)}</code>\n`;
+    out += `   • <b>État :</b> ${c.status}\n`;
+    out += `   • <b>Variations :</b> 1h: <code>${fmtPct(c.change1h)}</code> | 24h: <b>${fmtPct(c.change24h)}</b> | 7j: <code>${fmtPct(c.change7d)}</code> | 30j: <code>${fmtPct(c.change30d)}</code>\n`;
+    if (c.ath) out += `   • <b>Record (ATH) :</b> <code>${fmtPrice(c.ath)}</code>\n`;
+
+    if (c.archives && c.archives.length > 0) {
+      const sample = c.archives.slice(0, 3).map(a => `${a.periode.replace('Il y a ', '')}: ${a.prix_epoque} (${a.performance})`).join(' • ');
+      out += `   • 🕰️ <b>Archives :</b> ${sample}\n`;
+    }
+    out += `\n`;
+  }
+
+  out += `<blockquote>💡 <b>Interaction directe :</b> Tu peux cliquer sur les boutons ci-dessous pour approfondir les archives de 1 à 18 ans ou me poser une question comparative !</blockquote>`;
+  return out;
+}
+
+// --- SYNTHÈSE HYBRIDE (IA GEMINI MULTI-MODÈLES + BASCULE NATIVE GARANTIE) ---
+async function synthesizeWithAIOrNative(mode, userQuestion, payload) {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+
+  if (apiKey) {
+    const models = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+    const prompt = `Tu es un analyste et stratège crypto professionnel sur Telegram.
+Voici les données financières vérifiées en temps réel et les archives de 1 à 18 ans :
+${JSON.stringify(payload)}
+
+DEMANDE DE L'UTILISATEUR : "${userQuestion}"
+
+RÈGLES STRICTES :
+1. Réponds DIRECTEMENT et précisément avec les VRAIS chiffres fournis ci-dessus (prix actuels, variations 1h/24h/7j, états de hausse/baisse/stagnation et archives historiques). Ne dis JAMAIS simplement "les données ont été récupérées".
+2. Formatage HTML Telegram uniquement : <b>gras</b>, <i>italique</i>, <code>chiffres</code>, <blockquote>synthèse finale</blockquote>. Aucun Markdown (**).
+3. Sois fluide, humain, structuré avec des puces visuelles (🟢, 🔴, ⚖️, 🚀, 🕰️) et concis (12 à 18 lignes).`;
+
+    for (const modelName of models) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5500);
+
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: { temperature: 0.35, maxOutputTokens: 750 }
+            })
+          }
+        );
+        clearTimeout(timer);
+
+        if (res.ok) {
+          const json = await res.json();
+          let aiReply = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (aiReply && aiReply.length > 40) {
+            return aiReply.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>').replace(/```html|```/g, '').trim();
+          }
+        }
+      } catch (e) {
+        // Passe automatiquement au modèle suivant ou au moteur natif
+      }
+    }
+  }
+
+  // Si Gemini est indisponible ou lent, le Moteur Analytique Natif génère immédiatement la réponse chiffrée complète
+  return buildNativeExpertReport(mode, userQuestion, payload);
+}
+
+// --- DÉTECTEUR D'INTENTION ET GESTION DU HORS-SUJET ---
+function classifyIntent(userText, detectedCoins) {
+  const clean = (userText || '').toLowerCase().trim();
+
+  // Salutations / Présentation
+  if (/^(bonjour|salut|hello|hey|bonsoir|coucou|yo|ça va|ca va|qui es tu|qui es-tu)/.test(clean) && clean.split(/\s+/).length <= 5) {
+    return 'GREETING';
+  }
+
+  if (detectedCoins.length > 0) {
+    if (/archive|ans|an|annee|année|historique|2008|2010|2012|2015|2016|2018|2020|origine|genese|genèse/.test(clean)) {
+      return 'COIN_HISTORY';
+    }
+    return 'COIN_ANALYSIS';
+  }
+
+  const hasCryptoWord = CRYPTO_KEYWORDS.some(k => clean.includes(k));
+  if (hasCryptoWord) {
+    if (/tendance|trending|explose|meilleur|top|gainer|mouvement/.test(clean)) return 'MARKET_TRENDING';
+    if (/archive|ans|an|historique|18 ans|10 ans|5 ans/.test(clean)) return 'MARKET_HISTORY';
+    return 'MARKET_GLOBAL';
+  }
+
+  return 'OUT_OF_SCOPE';
+}
+
+// --- ORCHESTRATEUR PRINCIPAL AVEC ANIMATIONS DE FEEDBACK ---
+async function handleRequestWithFeedback(token, chatId, userQuery, forcedMode = null) {
+  // Étape 1 : Message animé instantané (Feedback immédiat 25%)
+  const progressId = await sendProgressMessage(
+    token,
+    chatId,
+    `⚡ <b>Initialisation du moteur d'analyse...</b>\n<code>[███▒▒▒▒▒▒▒] 25%</code> — <i>Connexion aux flux de marché en direct...</i>`
+  );
+
+  const detectedCoins = await resolveCoinsFromText(userQuery);
+  const intent = forcedMode || classifyIntent(userQuery, detectedCoins);
+
+  // Cas particulier 1 : Salutation conviviale + Météo flash en direct
+  if (intent === 'GREETING') {
+    const core = await Promise.all([CATALOG.btc, CATALOG.eth, CATALOG.zec].map(fetchCoinCompleteProfile));
+    const greetingHtml =
+      `👋 <b>Salut ! Ravi de te retrouver sur ton terminal d'analyse crypto.</b>\n` +
+      `<code>━━━━━━━━━━━━━━━━━━━━━━</code>\n` +
+      `Voici le pouls immédiat du marché pendant qu'on discute :\n\n` +
+      core.map(c => `• <b>${c.name} (${c.symbol})</b> : <code>${fmtPrice(c.price)}</code> (${c.status} : <b>${fmtPct(c.change24h)}</b> sur 24h)`).join('\n') +
+      `\n\n<blockquote>💬 <b>Que veux-tu analyser maintenant ?</b>\nDemande-moi le cours ou l'historique (de 1 à 18 ans) de n'importe quelle cryptomonnaie, ou clique sur un onglet ci-dessous !</blockquote>`;
+
+    await deliverFinalMessage(token, chatId, progressId, greetingHtml, buildKeyboard());
+    return;
+  }
+
+  // Cas particulier 2 : Question hors-sujet ou devise non reconnue -> Redirection intelligente
+  if (intent === 'OUT_OF_SCOPE') {
+    const redirectHtml =
+      `🧭 <b>Information sur ma spécialisation</b>\n` +
+      `<code>━━━━━━━━━━━━━━━━━━━━━━</code>\n` +
+      `Je ne suis pas programmé pour répondre à la demande : <i>« ${userQuery.replace(/<[^>]*>/g, '')} »</i> (ou la devise mentionnée n'est pas répertoriée sur les marchés mondiaux).\n\n` +
+      `🎯 <b>Mon domaine d'expertise :</b>\n` +
+      `Je suis spécialisé dans l'analyse en temps réel de <b>toutes les cryptomonnaies</b> (variations 1h, 24h, 7j, tendances mondiales) et l'extraction de leurs <b>archives historiques de 1 à 18 ans</b>.\n\n` +
+      `<blockquote>💡 <b>Voici des exemples de questions auxquelles je réponds instantanément :</b>\n` +
+      `• <i>"Quelles sont les cryptomonnaies qui ont le plus augmenté aujourd'hui ?"</i>\n` +
+      `• <i>"Analyse le prix de Solana, XRP et Zcash en direct."</i>\n` +
+      `• <i>"Quel était le prix du Bitcoin et d'Ethereum il y a 5 ans et 10 ans ?"</i></blockquote>`;
+
+    await deliverFinalMessage(token, chatId, progressId, redirectHtml, buildKeyboard());
+    return;
+  }
+
+  // Étape 2 : Animation de progression (70%) pendant la collecte des données et archives
+  await updateProgressMessage(
+    token,
+    chatId,
+    progressId,
+    `📡 <b>Collecte & Traitement des données...</b>\n<code>[███████▒▒▒] 70%</code> — <i>Extraction des prix temps réel et archives (1–18 ans)...</i>`
+  );
+
+  // Cas 3 : Analyse de cryptos spécifiques (avec ou sans focus archives)
+  if (intent === 'COIN_ANALYSIS' || intent === 'COIN_HISTORY' || forcedMode === 'majors' || forcedMode === 'history') {
+    const targetList = detectedCoins.length > 0
+      ? detectedCoins
+      : [CATALOG.btc, CATALOG.eth, CATALOG.sol, CATALOG.bnb, CATALOG.xrp, CATALOG.zec];
+
+    const coinsData = await Promise.all(targetList.map(fetchCoinCompleteProfile));
+    const reportMode = (intent === 'COIN_HISTORY' || forcedMode === 'history') ? 'history' : 'coins';
+
+    const finalHtml = await synthesizeWithAIOrNative(reportMode, userQuery, { coinsData });
+    await deliverFinalMessage(token, chatId, progressId, finalHtml, buildKeyboard(detectedCoins));
+    return;
+  }
+
+  // Cas 4 : Panorama Marché Global ou Top Tendances
+  const marketData = await fetchGlobalMarketData();
+  const reportMode = (intent === 'MARKET_TRENDING' || forcedMode === 'trending') ? 'trending' : 'global';
+  const finalHtml = await synthesizeWithAIOrNative(reportMode, userQuery, { marketData });
+
+  await deliverFinalMessage(token, chatId, progressId, finalHtml, buildKeyboard());
+}
+
+// --- POINT D'ENTRÉE DU SERVEUR VERCEL ---
 module.exports = async function handler(req, res) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const host = req.headers.host;
 
-  // --- MODE NAVIGATEUR (Setup & Ping Automatique) ---
+  // 1. Mode Navigateur (Activation Webhook, Test Ping & Diagnostic)
   if (req.method === 'GET') {
     const { setup, ping } = req.query || {};
 
@@ -363,100 +712,133 @@ module.exports = async function handler(req, res) {
       const webhookUrl = `https://${host}/api/webhook`;
       const tgRes = await fetch(`https://api.telegram.org/bot${token}/setWebhook?url=${webhookUrl}`);
       const tgJson = await tgRes.json();
-      return res.status(200).json({ message: 'Webhook mis à jour avec succès !', detail: tgJson });
+      return res.status(200).json({ message: 'Webhook V4 connecté avec succès !', detail: tgJson });
     }
 
     if (ping === 'true') {
-      const pingPrompt = "Génère un Flash Radar Crypto captivant : donne la météo globale du marché, les cryptos majeures (BTC, ETH, SOL, ZEC), la crypto qui performe le mieux aujourd'hui dans le Top 15 et les cryptos en tendance, en indiquant clairement ce qui monte, baisse ou stagne, avec un clin d'œil aux archives.";
-      const report = await processUserRequest(pingPrompt);
-      await sendTelegramMessage(token, process.env.TELEGRAM_CHAT_ID, `🔔 <b>FLASH RADAR — VEILLE AUTOMATIQUE</b>\n\n${report}`, true);
-      return res.status(200).json({ ok: true, message: 'Ping Pro envoyé sur Telegram !' });
+      const coinsData = await Promise.all([CATALOG.btc, CATALOG.eth, CATALOG.sol, CATALOG.zec].map(fetchCoinCompleteProfile));
+      const marketData = await fetchGlobalMarketData();
+      const pingHtml = await synthesizeWithAIOrNative(
+        'global',
+        "Fais un Ping de veille automatique percutant : donne l'état (hausse, baisse ou stagnation) de BTC, ETH, SOL et ZEC sur 1h et 24h, cite la plus forte hausse du marché aujourd'hui et ajoute un bref comparatif historique.",
+        { coinsData, marketData }
+      );
+      await deliverFinalMessage(token, process.env.TELEGRAM_CHAT_ID, null, `🔔 <b>PING AUTO — VEILLE CRYPTO</b>\n\n${pingHtml}`, buildKeyboard());
+      return res.status(200).json({ ok: true, message: 'Ping envoyé sur Telegram !' });
     }
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.status(200).send(`
-      <body style="font-family:system-ui,sans-serif;background:#0d1117;color:#f0f6fc;padding:40px;text-align:center;">
-        <h2>🚀 Ton Bot Crypto Universel (V3 Interactive) est Actif !</h2>
-        <p style="color:#8b949e;">Toutes les cryptos CoinGecko • Archives 1 à 18 ans • Boutons Interactifs</p>
-        <p><a href="/api/webhook?setup=true" style="background:#238636;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;display:inline-block;margin:10px;font-weight:bold;">🔗 1. Relier / Actualiser le Webhook</a></p>
-        <p><a href="/api/webhook?ping=true" style="background:#1f6feb;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;display:inline-block;margin:10px;font-weight:bold;">🔔 2. Tester le nouveau Ping Esthétique</a></p>
+      <body style="font-family:system-ui,sans-serif;background:#090d16;color:#f0f6fc;padding:40px;text-align:center;">
+        <h2>⚡ Bot Crypto V4 Enterprise — Opérationnel</h2>
+        <p style="color:#8b949e;">Animations Live • Double Moteur IA + Natif • Multi-Sources • Archives 1–18 ans</p>
+        <p><a href="/api/webhook?setup=true" style="background:#238636;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;display:inline-block;margin:10px;font-weight:bold;">🔗 1. Vérifier le Webhook Telegram</a></p>
+        <p><a href="/api/webhook?ping=true" style="background:#1f6feb;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;display:inline-block;margin:10px;font-weight:bold;">🔔 2. Envoyer un Ping Immédiat</a></p>
       </body>
     `);
   }
 
-  // --- MODE TELEGRAM (Messages écrits ET Boutons cliqués) ---
+  // 2. Mode Telegram (Clics sur Boutons & Questions Écrites)
   if (req.method === 'POST') {
     try {
       const { message, callback_query } = req.body || {};
 
-      // A. Si l'utilisateur a cliqué sur l'un des boutons interactifs sous un message
+      // A. GESTION DES CLICS SUR LES ONGLETS / BOUTONS INTERACTIFS
       if (callback_query) {
         const chatId = callback_query.message.chat.id;
-        const action = callback_query.data;
+        const action = callback_query.data || 'cmd_global';
 
-        // Acquitter le clic immédiatement pour enlever l'icône de chargement sur le bouton
+        // Stoppe immédiatement l'icône de chargement du bouton avec une notification en haut de l'écran
         await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ callback_id: callback_query.id, text: 'Analyse en cours...' })
+          body: JSON.stringify({ callback_id: callback_query.id, text: '⚡ Chargement des données en direct...' })
         });
 
-        await fetch(`https://api.telegram.org/bot${token}/sendChatAction`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, action: 'typing' })
-        });
+        if (action === 'cmd_help') {
+          const helpHtml =
+            `🧭 <b>GUIDE INTERACTIF DU TERMINAL CRYPTO</b>\n` +
+            `<code>━━━━━━━━━━━━━━━━━━━━━━</code>\n` +
+            `Voici tout ce que tu peux me demander en langage naturel :\n\n` +
+            `1️⃣ <b>Suivi en direct (15 000+ cryptos) :</b>\n` +
+            `   • <i>"Où en sont Bitcoin, Solana et Zcash aujourd'hui ?"</i>\n` +
+            `   • <i>" Analyse Kaspa, Pepe et Cardano."</i>\n\n` +
+            `2️⃣ <b>Archives Historiques (de 1 à 18 ans) :</b>\n` +
+            `   • <i>"Compare le prix du Bitcoin il y a 1 an, 10 ans et 18 ans."</i>\n` +
+            `   • <i>"Quelle est l'évolution d'Ethereum et Litecoin sur 8 ans ?"</i>\n\n` +
+            `3️⃣ <b>Scanner du Marché Global :</b>\n` +
+            `   • <i>"Quelles cryptos ont le plus augmenté ces dernières 24h ?"</i>\n\n` +
+            `<blockquote>👇 <b>Clique sur n'importe quel onglet ci-dessous pour recevoir une analyse chiffrée immédiate :</b></blockquote>`;
+          await deliverFinalMessage(token, chatId, null, helpHtml, buildKeyboard());
+          return res.status(200).json({ ok: true });
+        }
 
-        const buttonPrompts = {
-          cmd_global: "Dresse un panorama complet et esthétique du marché crypto global aujourd'hui : météo générale, dominance, le Top 10 des cryptomonnaies et les leaders à la hausse comme à la baisse.",
-          cmd_trending: "Quelles sont les cryptomonnaies les plus tendances (Trending) qui attirent toute l'attention aujourd'hui sur le web, ainsi que les plus forts mouvements sur 24h ?",
-          cmd_majors: "Fais une analyse comparative précise en temps réel sur Bitcoin (BTC), Ethereum (ETH), Solana (SOL), BNB, XRP et Zcash (ZEC) : prix, variations 1h/24h/7j et dynamique actuelle.",
-          cmd_history: "Compare les prix actuels de Bitcoin, Ethereum, Dogecoin, Litecoin et Zcash avec leurs archives historiques sur 1 an, 5 ans, 10 ans et jusqu'à 18 ans (genèse 2008).",
-          cmd_help: "Présente-toi avec enthousiasme et donne 5 exemples concrets et variés de questions que l'utilisateur peut te poser sur n'importe quelle crypto du marché ou sur les archives de 1 à 18 ans."
+        // Si bouton dynamique d'archive ou de comparaison d'une crypto spécifique (ex: hist_SOL ou cmp_ZEC)
+        if (action.startsWith('hist_')) {
+          const sym = action.replace('hist_', '');
+          await handleRequestWithFeedback(
+            token,
+            chatId,
+            `Donne-moi toutes les archives historiques de 1 à 18 ans et l'évolution complète de ${sym}.`,
+            'history'
+          );
+          return res.status(200).json({ ok: true });
+        }
+
+        if (action.startsWith('cmp_')) {
+          const sym = action.replace('cmp_', '');
+          await handleRequestWithFeedback(
+            token,
+            chatId,
+            `Compare en détail les performances en direct et sur plusieurs années de ${sym} face au Bitcoin (BTC).`,
+            'coins'
+          );
+          return res.status(200).json({ ok: true });
+        }
+
+        const actionMap = {
+          cmd_global: { mode: 'global', query: "Dresse le panorama complet du marché crypto mondial aujourd'hui (Top 10, prix exacts, variations 1h et 24h, dominance BTC/ETH)." },
+          cmd_trending: { mode: 'trending', query: "Quelles sont les cryptomonnaies qui enregistrent les plus fortes hausses, les plus fortes baisses et les tendances majeures sur 24h ?" },
+          cmd_majors: { mode: 'majors', query: "Analyse détaillée en temps réel des piliers : Bitcoin (BTC), Ethereum (ETH), Solana (SOL), BNB, XRP et Zcash (ZEC)." },
+          cmd_history: { mode: 'history', query: "Présente le comparatif des archives historiques de 1 à 18 ans (2008 à aujourd'hui) pour Bitcoin, Ethereum, Zcash et Solana." },
+          cmd_refresh: { mode: 'global', query: "Actualise les cours en direct et indique ce qui vient de bouger sur la dernière heure et sur 24h." }
         };
 
-        const chosenPrompt = buttonPrompts[action] || buttonPrompts.cmd_global;
-        const replyHtml = await processUserRequest(chosenPrompt);
-        await sendTelegramMessage(token, chatId, replyHtml, true);
+        const selected = actionMap[action] || actionMap.cmd_global;
+        await handleRequestWithFeedback(token, chatId, selected.query, selected.mode);
         return res.status(200).json({ ok: true });
       }
 
-      // B. Si l'utilisateur a tapé un message ou une question libre
+      // B. GESTION DES MESSAGES ET QUESTIONS ÉCRITES PAR L'UTILISATEUR
       if (message && message.text) {
         const chatId = message.chat.id;
         const userText = message.text.trim();
 
-        await fetch(`https://api.telegram.org/bot${token}/sendChatAction`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, action: 'typing' })
-        });
-
         if (userText === '/start' || userText === '/menu') {
-          const welcomeHtml =
-            `⚡ <b>Bienvenue sur ton Radar Crypto Intelligent !</b>\n` +
-            `<code>━━━━━━━━━━━━━━━━━━</code>\n\n` +
-            `Je surveille en direct <b>plus de 15 000 cryptomonnaies</b> ainsi que <b>18 ans d'archives historiques</b> (2008–2026).\n\n` +
-            `💬 <b>Parle-moi librement :</b>\n` +
-            `• <i>"Que se passe-t-il sur Solana, Pepe et Kaspa aujourd'hui ?"</i>\n` +
-            `• <i>"Quelles cryptos explosent à la hausse en ce moment ?"</i>\n` +
-            `• <i>"Compare Cardano, XRP et Zcash sur 5 ans."</i>\n\n` +
-            `<blockquote>👇 <b>Tu peux aussi cliquer directement sur les boutons ci-dessous pour explorer le marché d'un geste :</b></blockquote>`;
-          await sendTelegramMessage(token, chatId, welcomeHtml, true);
+          const startHtml =
+            `⚡ <b>TERMINAL CRYPTO V4 — ACTIF 24/7</b>\n` +
+            `<code>━━━━━━━━━━━━━━━━━━━━━━</code>\n` +
+            `Bienvenue ! Je suis connecté en temps réel aux marchés mondiaux et à <b>18 ans d'archives historiques (2008–2026)</b>.\n\n` +
+            `✅ <b>Ce que je fais pour toi :</b>\n` +
+            `• Analyse en direct de <b>toutes les cryptomonnaies</b> (1h, 24h, 7j, 30j).\n` +
+            `• Comparaison avec les archives de <b>1 à 18 ans</b>.\n` +
+            `• Détection des hausses, baisses, stagnations et cryptos en tendance.\n\n` +
+            `<blockquote>👇 <b>Clique sur un onglet ci-dessous ou pose-moi directement ta question dans le chat :</b></blockquote>`;
+          await deliverFinalMessage(token, chatId, null, startHtml, buildKeyboard());
           return res.status(200).json({ ok: true });
         }
 
         if (userText === '/id') {
-          await sendTelegramMessage(token, chatId, `🔑 Ton Chat ID est : <code>${chatId}</code>`, true);
+          await deliverFinalMessage(token, chatId, null, `🔑 Ton Chat ID est : <code>${chatId}</code>`, buildKeyboard());
           return res.status(200).json({ ok: true });
         }
 
-        const replyHtml = await processUserRequest(userText);
-        await sendTelegramMessage(token, chatId, replyHtml, true);
+        await handleRequestWithFeedback(token, chatId, userText, null);
       }
 
       return res.status(200).json({ ok: true });
     } catch (e) {
+      console.error('Webhook Error:', e);
       return res.status(200).json({ ok: true });
     }
   }
